@@ -1,0 +1,54 @@
+import pandas as pd
+import numpy as np
+from scipy.special import hankel2
+import matplotlib.pyplot as plt
+
+# Define the file paths
+file_paths = {
+    'E_incident_imaginary': 'E_incident_imaginary.txt',
+    'E_incident_real': 'E_incident_real.txt',
+    'E_o_imaginary': 'E_o_imaginary.txt',
+    'E_o_real': 'E_o_real.txt',
+    'E_tot_imaginary': 'E_tot_imaginary.txt',
+    'E_tot_real': 'E_tot_real.txt'
+}
+
+# Constants
+c = 3e8  # Speed of light in m/s
+epsilon_0 = 8.854e-12  # Permittivity of free space in F/m
+h = 1.27e-3  # Physical constant h in meters
+r = 20e-3  # Radial distance in meters
+
+# Reading and processing the data
+def read_complex_field(file_real, file_imag):
+    real_part = pd.read_csv(file_real, delim_whitespace=True, skiprows=3, header=None, names=['Frequency', 'Real'])
+    imag_part = pd.read_csv(file_imag, delim_whitespace=True, skiprows=3, header=None, names=['Frequency', 'Imag'])
+    complex_field = real_part['Real'] + 1j * imag_part['Imag']
+    return real_part['Frequency'], complex_field  # Frequency in GHz
+
+# Read the fields and construct complex fields
+frequency, E_incident = read_complex_field(file_paths['E_incident_real'], file_paths['E_incident_imaginary'])
+_, E_o = read_complex_field(file_paths['E_o_real'], file_paths['E_o_imaginary'])
+_, E_tot = read_complex_field(file_paths['E_tot_real'], file_paths['E_tot_imaginary'])
+#print(E_tot)
+
+# Calculations
+k = 2 * np.pi * (frequency * 1e9) / c  # Convert GHz to Hz for calculation
+H_0_2 = hankel2(0, k * r)
+A_0c = (1 / (np.pi * 2)) * (1 / H_0_2) * (E_tot - E_incident)
+p_z = A_0c * (1j * 4 * h * epsilon_0) / (k**2)
+alpha_zzp = p_z / E_o
+alpha_zzp_real = np.real(alpha_zzp)
+alpha_zzp_imag = np.imag(alpha_zzp)
+print(E_tot)
+
+# Plotting
+plt.figure(figsize=(6, 4))
+plt.plot(frequency, alpha_zzp_real, label='Real Part of α_zzp')
+plt.plot(frequency, alpha_zzp_imag, linestyle='dotted', label='Imaginary Part of α_zzp')
+plt.xlabel('Frequency (GHz)')
+plt.ylabel('Polarizability (α_zzp in m³)')
+plt.title('Real and Imaginary Parts of Polarizability α_zzp vs Frequency')
+plt.legend()
+plt.grid(True)
+plt.show()
