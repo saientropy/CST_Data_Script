@@ -1,0 +1,88 @@
+import numpy as np
+import pandas as pd
+from scipy.special import hankel2
+from scipy.integrate import simps
+import matplotlib.pyplot as plt
+
+# File names - Change these as needed
+e_o_real_filename = 'E_o_real.txt'
+e_o_imaginary_filename = 'E_o_imaginary.txt'
+e_tot_complex_filename = 'E_tot_complex.csv'
+e_incident_complex_filename = 'E_incident_complex.csv'
+
+# Load and process E_o_real and E_o_imaginary data
+e_o_real_df = pd.read_csv(e_o_real_filename, skiprows=3, sep="\s+", header=None, names=['Frequency', 'e_o_real'])
+e_o_imaginary_df = pd.read_csv(e_o_imaginary_filename, skiprows=3, sep="\s+", header=None, names=['Frequency', 'e_o_imag'])
+e_o_real_df['Frequency'] *= 1e9  # Convert GHz to Hz
+e_o_imaginary_df['Frequency'] *= 1e9
+e_o_df = pd.merge(e_o_real_df, e_o_imaginary_df, on='Frequency')
+e_o_df['E_0'] = e_o_df['e_o_real'] + 1j * e_o_df['e_o_imag']
+
+# Load and process E_tot_complex and E_incident_complex data
+e_tot_complex_df = pd.read_csv(e_tot_complex_filename)
+e_incident_complex_df = pd.read_csv(e_incident_complex_filename)
+for col in e_tot_complex_df.columns[1:]:
+    e_tot_complex_df[col] = e_tot_complex_df[col].apply(lambda x: complex(x.replace('i', 'j')))
+for col in e_incident_complex_df.columns[1:]:
+    e_incident_complex_df[col] = e_incident_complex_df[col].apply(lambda x: complex(x.replace('i', 'j')))
+
+# Constants
+h_m = 1.27e-3  # h in meters
+radius_m = 20e-3  # Radius in meters
+epsilon_0 = 8.854e-12  # Permittivity of free space in F/m
+c = 3e8  # Speed of light in m/s
+
+# Function to interpolate E_0 values
+def interpolate_E_0(frequencies, e_o_df):
+    e_o_real_interpolated = np.interp(frequencies, e_o_df['Frequency'], e_o_df['e_o_real'])
+    e_o_imag_interpolated = np.interp(frequencies, e_o_df['Frequency'], e_o_df['e_o_imag'])
+    return e_o_real_interpolated + 1j * e_o_imag_interpolated
+
+# Extracting frequencies and interpolating E_0
+frequencies = [float(col.split('_')[2].replace('GHz', '')) * 1e9 for col in e_tot_complex_df.columns[1:]]
+E_0_interpolated = interpolate_E_0(frequencies, e_o_df)
+
+# Convert arc length to radians for integration
+e_tot_complex_df['Theta'] = (e_tot_complex_df['Arc Length'] / 1000) / radius_m
+
+# Calculate A_s', P_z, and alpha_zz_p for each frequency
+results_df = pd.DataFrame({
+    'Frequency': frequencies,
+    'A_s_prime': np.zeros(len(frequencies), dtype=complex),
+    'P_z': np.zeros(len(frequencies), dtype=complex),
+    'alpha_zz_p': np.zeros(len(frequencies), dtype=complex)
+})
+
+for idx, freq in enumerate(frequencies):
+    k = (2 * np.pi * freq) / c
+    hankel_value = hankel2(0, k * radius_m)
+    E_tot_col = e_tot_complex_df['E_field_' + str(freq / 1e9) + 'GHz']
+    E_inc_col = e_incident_complex_df['E_field_' + str(freq / 1e9) + 'GHz']
+    integrand = E_tot_col - E_inc_col
+    integral = simps(integrand, e_tot_complex_df['Theta'])
+    integral2 = simps(E_tot_col, e_tot_complex_df['Theta'])
+    A_s_prime = integral / (2 * np.pi * hankel_value)
+    P_z = A_s_prime * (4 * 1j * h_m * epsilon_0) / (k**2)
+    alpha_zz_p = P_z / E_0_interpolated[idx]
+    results_df.at[idx, 'A_s_prime'] = A_s_prime
+    results_df.at[idx, 'P_z'] = P_z
+    results_df.at[idx, 'alpha_zz_p'] = alpha_zz_p
+    print(e_tot_complex_df['Theta'])
+    #print(integral2)
+    #print(E_tot_col)
+
+# Plotting the real and imaginary parts of polarizability vs frequency
+plt.figure(figsize=(6, 4))
+
+# Real part
+plt.plot(results_df['Frequency'] / 1e9, results_df['alpha_zz_p'].apply(lambda x: x.real), label='Real Part of Polarizability', color='blue')
+
+# Imaginary part
+plt.plot(results_df['Frequency'] / 1e9, results_df['alpha_zz_p'].apply(lambda x: x.imag), label='Imaginary Part of Polarizability', color='red', linestyle='--')
+
+plt.title('Polarizability vs Frequency')
+plt.xlabel('Frequency (GHz)')
+plt.ylabel('Polarizability (α_zz_p)')
+plt.legend()
+plt.grid(True)
+plt.show()
